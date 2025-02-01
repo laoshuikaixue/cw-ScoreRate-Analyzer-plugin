@@ -50,7 +50,7 @@ class SmoothScrollArea(QScrollArea):
 
     def wheelEvent(self, e):
         if hasattr(self.vScrollBar, 'setValue'):
-            self.vScrollBar.setValue(self.vScrollBar.value() - e.angleDelta().y() // 8)
+            self.vScrollBar.setValue(self.vScrollBar.value() - e.angleDelta().y())
 
 
 class Plugin(PluginBase):
@@ -194,7 +194,7 @@ class Plugin(PluginBase):
                 course_name = course_mapping.get(course_id, f"未知科目({course_id})")
                 score_rate = record.get("scoreRate")
                 score_rate_str = f"{score_rate}%" if score_rate != "-" else score_rate
-                content += f"   {course_name}：{score_rate_str}\n"
+                content += f"   {course_name}：{score_rate_str}"
             content += "\n"
 
         print(content)
