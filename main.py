@@ -1,5 +1,6 @@
 import json
 import time
+import threading
 
 import requests
 from PyQt5.QtCore import QPropertyAnimation, QEasingCurve, QTimer
@@ -70,7 +71,9 @@ class Plugin(PluginBase):
         self.timer.start(30)  # 设置滚动速度
 
         self.headers = self.load_headers()  # 加载请求头数据
-        self.previous_group = self.cfg['group']  # 保存初始组别值
+        self.previous_data = None  # 保存上一次成功获取的数据
+
+        self.start_auto_update_thread()  # 启动自动更新线程
 
     def load_headers(self):
         """加载请求头数据"""
@@ -98,52 +101,63 @@ class Plugin(PluginBase):
             'endDate': '2025-01-01'
         }
 
-        # 发送GET请求
-        response_get = requests.get(
-            'https://www.xinjiaoyu.com/api/v3/server_homework/homework/class/score/rate',
-            headers=self.headers,
-            params=params_get
-        )
+        try:
+            # 发送GET请求
+            response_get = requests.get(
+                'https://www.xinjiaoyu.com/api/v3/server_homework/homework/class/score/rate',
+                headers=self.headers,
+                params=params_get
+            )
 
-        # 检查GET请求是否成功
-        if response_get.status_code != 200:
-            raise Exception(f'GET请求失败，状态码：{response_get.status_code}')
+            # 检查GET请求是否成功
+            if response_get.status_code != 200:
+                raise Exception(f'GET请求失败，状态码：{response_get.status_code}')
 
-        data = response_get.json()
+            data = response_get.json()
 
-        # 提取templateIds和homeworkIds
-        template_ids = [str(homework['templateId']) for course in data['data']['homeworkCourseVOList'] for homework in
-                        course['homeworkVOList'] if homework['templateId'] is not None]
-        homework_ids = [homework_id for course in data['data']['homeworkCourseVOList'] for homework in
-                        course['homeworkVOList'] for homework_id in homework['homeworkIds']]
-        class_ids = [cls['classId'] for cls in data['data']['classVOList']]
+            # 提取templateIds和homeworkIds
+            template_ids = [str(homework['templateId']) for course in data['data']['homeworkCourseVOList'] for homework
+                            in
+                            course['homeworkVOList'] if homework['templateId'] is not None]
+            homework_ids = [homework_id for course in data['data']['homeworkCourseVOList'] for homework in
+                            course['homeworkVOList'] for homework_id in homework['homeworkIds']]
+            class_ids = [cls['classId'] for cls in data['data']['classVOList']]
 
-        # 构造POST请求负载
-        payload = {
-            'schoolId': params_get['schoolId'],
-            'gradeId': params_get['gradeId'],
-            'templateIds': template_ids,
-            'homeworkIds': homework_ids,
-            'schoolYearName': params_get['schoolYearName'],
-            'isHistory': params_get['isHistory'].lower() == 'true',
-            'classIds': class_ids
-        }
+            # 构造POST请求负载
+            payload = {
+                'schoolId': params_get['schoolId'],
+                'gradeId': params_get['gradeId'],
+                'templateIds': template_ids,
+                'homeworkIds': homework_ids,
+                'schoolYearName': params_get['schoolYearName'],
+                'isHistory': params_get['isHistory'].lower() == 'true',
+                'classIds': class_ids
+            }
 
-        # 发送POST请求
-        response_post = requests.post(
-            'https://www.xinjiaoyu.com/api/v3/server_homework/homework/answer/sheet/class/score/rate',
-            headers=self.headers,
-            json=payload
-        )
+            # 发送POST请求
+            response_post = requests.post(
+                'https://www.xinjiaoyu.com/api/v3/server_homework/homework/answer/sheet/class/score/rate',
+                headers=self.headers,
+                json=payload
+            )
 
-        if response_post.status_code != 200:
-            raise Exception(f'POST请求失败，状态码：{response_post.status_code}')
+            if response_post.status_code != 200:
+                raise Exception(f'POST请求失败，状态码：{response_post.status_code}')
 
-        return response_post.json()
+            return response_post.json()
+
+        except Exception as ex:
+            logger.error(f"获取数据失败: {ex}")
+            if self.previous_data:
+                logger.info("使用之前成功获取的数据")
+                return self.previous_data
+            else:
+                raise Exception("无法获取数据且没有之前的数据可用")
 
     def update_widget_content(self):
         """更新小组件内容"""
         data = self.fetch_and_update_data()
+        self.previous_data = data  # 保存成功获取的数据
 
         # 构建科目映射关系：courseId -> courseName
         course_list = data["data"]["courseVOList"]
@@ -163,7 +177,8 @@ class Plugin(PluginBase):
         if overall_data:
             content += "【全年级】\n"
             overall_full_subject_rate = get_score_rate(overall_data.get("courseScoreRate", []), "-1")
-            overall_full_subject_rate_str = f"{overall_full_subject_rate}%" if overall_full_subject_rate != "-" else overall_full_subject_rate
+            overall_full_subject_rate_str = f"{overall_full_subject_rate}%" if overall_full_subject_rate != "-" else\
+                overall_full_subject_rate
             content += f"全科得分率：{overall_full_subject_rate_str}\n单科得分率：\n"
             for record in overall_data.get("courseScoreRate", []):
                 course_id = record.get("courseId")
@@ -194,7 +209,7 @@ class Plugin(PluginBase):
                 course_name = course_mapping.get(course_id, f"未知科目({course_id})")
                 score_rate = record.get("scoreRate")
                 score_rate_str = f"{score_rate}%" if score_rate != "-" else score_rate
-                content += f"   {course_name}：{score_rate_str}"
+                content += f"   {course_name}：{score_rate_str}\n"
             content += "\n"
 
         print(content)
@@ -265,26 +280,36 @@ class Plugin(PluginBase):
 
         scroll_area = self.test_widget.findChild(SmoothScrollArea)
         if not scroll_area:
-            logger.warning("无法找到 SmoothScrollArea，停止自动滚动")
+            # logger.warning("无法找到 SmoothScrollArea，停止自动滚动") # 不log了 不然要被刷屏了
             return
 
         vertical_scrollbar = scroll_area.verticalScrollBar()
         if not vertical_scrollbar:
-            logger.warning("无法找到垂直滚动条，停止自动滚动")
+            # logger.warning("无法找到垂直滚动条，停止自动滚动") # 不log了 不然要被刷屏了
             return
 
         max_value = vertical_scrollbar.maximum()
         self.scroll_position = 0 if self.scroll_position >= max_value else self.scroll_position + 1
         vertical_scrollbar.setValue(self.scroll_position)
 
-    def update(self, cw_contexts):
+    def start_auto_update_thread(self):
+        """启动自动更新线程"""
+
+        def auto_update():
+            while True:
+                try:
+                    self.update_widget_content()
+                except Exception as ex:
+                    logger.error(f"自动更新失败: {ex}")
+                time.sleep(1800)  # 每30分钟更新一次
+
+        thread = threading.Thread(target=auto_update)
+        thread.daemon = True  # 设置为守护线程，在主线程退出时自动结束
+        thread.start()
+
+    def update(self, cw_contexts):  # 每秒更新一次
         super().update(cw_contexts)
         self.cfg.update_config()
 
-        current_group = self.cfg['group']
-        if current_group != self.previous_group:
-            self.update_widget_content()
-            self.previous_group = current_group
-
-    def execute(self):
+    def execute(self):  # 自启动执行
         self.update_widget_content()
