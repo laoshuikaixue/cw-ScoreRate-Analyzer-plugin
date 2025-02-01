@@ -1,6 +1,6 @@
 {
     "name": "班级作业得分率显示插件",
-    "description": "一个用于显示近七天各班作业班级得分率的插件。",
+    "description": "一个用于显示近七天年级段及各班作业班级得分率的插件。",
     "version": "1.0.0",
     "plugin_ver": 1,
     "author": "LaoShui",
