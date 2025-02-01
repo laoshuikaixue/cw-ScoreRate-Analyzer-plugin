@@ -1,6 +1,7 @@
 import json
 import time
 import threading
+from datetime import datetime, timedelta
 
 import requests
 from PyQt5.QtCore import QPropertyAnimation, QEasingCurve, QTimer
@@ -89,17 +90,29 @@ class Plugin(PluginBase):
             logger.error("config.json 中缺少 headers 键!")
             return {}
 
+    def load_params(self, start_date, end_date):
+        """加载GET请求参数"""
+        try:
+            with open(self.CONFIG_PATH, 'r', encoding='utf-8') as f:
+                config = json.load(f)
+                params = config.get('params', {})
+                params['startDate'] = start_date
+                params['endDate'] = end_date
+                return params
+        except FileNotFoundError:
+            logger.error("未找到 config.json 文件，请先设置请求头数据!")
+            return {}
+        except KeyError:
+            logger.error("config.json 中缺少 params 键!")
+            return {}
+
     def fetch_and_update_data(self):
         """获取并更新数据"""
-        # GET请求参数
-        params_get = {
-            'schoolId': '123204',
-            'gradeId': '10024',
-            'schoolYearName': '2024-2025',
-            'isHistory': 'false',
-            'startDate': '2024-12-29',
-            'endDate': '2025-01-01'
-        }
+        # 计算最近七天的日期范围
+        end_date = datetime.now()
+        start_date = end_date - timedelta(days=7)
+        params_get = self.load_params(start_date.strftime('%Y-%m-%d'), end_date.strftime('%Y-%m-%d'))
+        # params_get = self.load_params("2024-12-29", "2025-01-01")  # 调试用
 
         try:
             # 发送GET请求
@@ -115,10 +128,13 @@ class Plugin(PluginBase):
 
             data = response_get.json()
 
+            # 检查数据是否存在
+            if not data.get('data') or not data['data'].get('homeworkCourseVOList'):
+                raise Exception('数据为空或格式不正确')
+
             # 提取templateIds和homeworkIds
             template_ids = [str(homework['templateId']) for course in data['data']['homeworkCourseVOList'] for homework
-                            in
-                            course['homeworkVOList'] if homework['templateId'] is not None]
+                            in course['homeworkVOList'] if homework['templateId'] is not None]
             homework_ids = [homework_id for course in data['data']['homeworkCourseVOList'] for homework in
                             course['homeworkVOList'] for homework_id in homework['homeworkIds']]
             class_ids = [cls['classId'] for cls in data['data']['classVOList']]
@@ -156,7 +172,13 @@ class Plugin(PluginBase):
 
     def update_widget_content(self):
         """更新小组件内容"""
-        data = self.fetch_and_update_data()
+        try:
+            data = self.fetch_and_update_data()
+        except Exception as e:
+            logger.error(f"更新小组件内容失败: {e}")
+            self.display_error_message("无法获取数据")
+            return
+
         self.previous_data = data  # 保存成功获取的数据
 
         # 构建科目映射关系：courseId -> courseName
@@ -175,6 +197,7 @@ class Plugin(PluginBase):
         # 处理全年级数据（classId 为 "-1"）- 全科和单科
         overall_data = next((item for item in data["data"]["scoreRateVOList"] if item.get("classId") == "-1"), None)
         if overall_data:
+            content += "\n近七天年级段作业得分率数据\n"
             content += "【全年级】\n"
             overall_full_subject_rate = get_score_rate(overall_data.get("courseScoreRate", []), "-1")
             overall_full_subject_rate_str = f"{overall_full_subject_rate}%" if overall_full_subject_rate != "-" else\
@@ -212,7 +235,7 @@ class Plugin(PluginBase):
                 content += f"   {course_name}：{score_rate_str}\n"
             content += "\n"
 
-        print(content)
+        # print(content)  # 调试用
 
         self.test_widget = self.method.get_widget(WIDGET_CODE)
         if not self.test_widget:
@@ -235,6 +258,34 @@ class Plugin(PluginBase):
         else:
             logger.error("滚动区域创建失败")
 
+    def display_error_message(self, message):
+        """显示错误信息"""
+        self.test_widget = self.method.get_widget(WIDGET_CODE)
+        if not self.test_widget:
+            logger.error(f"未找到小组件，WIDGET_CODE: {WIDGET_CODE}")
+            return
+
+        content_layout = self.find_child_layout(self.test_widget, 'contentLayout')
+        if not content_layout:
+            logger.error("未能找到小组件的'contentLayout'布局")
+            return
+
+        content_layout.setSpacing(5)
+        self.method.change_widget_content(WIDGET_CODE, WIDGET_NAME, WIDGET_NAME)
+        self.clear_existing_content(content_layout)
+
+        font_color = "#FFFFFF" if isDarkTheme() else "#000000"
+        error_label = QLabel(message)
+        error_label.setAlignment(Qt.AlignCenter)  # 设置文字为居中对齐
+        error_label.setStyleSheet(f"""
+            font-size: 18px;
+            color: {font_color};
+            padding: 10px;
+            font-weight: bold;
+            background: none;
+        """)
+        content_layout.addWidget(error_label)
+
     @staticmethod
     def find_child_layout(widget, layout_name):
         """根据名称查找并返回布局"""
@@ -254,7 +305,7 @@ class Plugin(PluginBase):
         content_label.setAlignment(Qt.AlignLeft)  # 设置文字为左对齐
         content_label.setWordWrap(True)
         content_label.setStyleSheet(f"""
-            font-size: 18px;
+            font-size: 20px;
             color: {font_color};
             padding: 10px;
             font-weight: bold;
