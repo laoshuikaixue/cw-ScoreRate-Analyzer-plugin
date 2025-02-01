@@ -14,7 +14,7 @@ from .ClassWidgets.base import PluginConfig, PluginBase
 
 # 自定义小组件
 WIDGET_CODE = 'ScoreRate_Analyzer_widget.ui'
-WIDGET_NAME = '班级得分率分析 | LaoShui'
+WIDGET_NAME = '作业得分率分析 | LaoShui'
 WIDGET_WIDTH = 245
 
 
