@@ -27,7 +27,7 @@ class SmoothScrollBar(QScrollBar):
         self.ani.setTargetObject(self)
         self.ani.setPropertyName(b"value")
         self.ani.setEasingCurve(QEasingCurve.OutCubic)
-        self.ani.setDuration(400)
+        self.ani.setDuration(400)  # 设置动画持续时间
         self.__value = self.value()
         self.ani.finished.connect(self.scrollFinished)
 
@@ -43,7 +43,7 @@ class SmoothScrollBar(QScrollBar):
         self.ani.start()
 
     def wheelEvent(self, e):
-        e.ignore()
+        e.ignore()  # 阻止默认滚轮事件
 
 
 class SmoothScrollArea(QScrollArea):
@@ -53,7 +53,7 @@ class SmoothScrollArea(QScrollArea):
         super().__init__(parent)
         self.vScrollBar = SmoothScrollBar()
         self.setVerticalScrollBar(self.vScrollBar)
-        self.setStyleSheet("QScrollBar:vertical { width: 0px; }")
+        self.setStyleSheet("QScrollBar:vertical { width: 0px; }")  # 隐藏滚动条
 
     def wheelEvent(self, e):
         if hasattr(self.vScrollBar, 'scrollValue'):
@@ -90,7 +90,7 @@ class Plugin(PluginBase):
         try:
             with open(self.CONFIG_PATH, 'r', encoding='utf-8') as f:
                 config = json.load(f)
-                config['headers']['t'] = str(int(time.time()))
+                config['headers']['t'] = str(int(time.time()))  # 更新请求头中的t字段为当前时间戳
                 return config['headers']
         except Exception as e:
             logger.error(f"加载配置文件失败: {e}")
@@ -120,7 +120,7 @@ class Plugin(PluginBase):
         # params = self.load_params("2024-12-29", "2025-01-01")  # 调试用
 
         try:
-            # 第一阶段请求：获取基础数据
+            # 第一阶段：GET获取作业ID数据
             response_get = requests.get(
                 'https://www.xinjiaoyu.com/api/v3/server_homework/homework/class/score/rate',
                 headers=self.headers,
@@ -135,7 +135,7 @@ class Plugin(PluginBase):
             if not data.get('data') or not data['data'].get('homeworkCourseVOList'):
                 raise Exception('数据为空或格式不正确')
 
-            # 第二阶段请求：获取详细得分率数据
+            # 第二阶段：POST获取作业详细得分率数据
             template_ids = [str(homework['templateId']) for course in data['data']['homeworkCourseVOList'] for homework
                             in course['homeworkVOList'] if homework['templateId'] is not None]
             homework_ids = [homework_id for course in data['data']['homeworkCourseVOList'] for homework in
@@ -181,7 +181,7 @@ class Plugin(PluginBase):
                     return item.get("scoreRate")
             return None
 
-        # 处理年级数据
+        # 处理全年级数据（classId 为 "-1"）- 全科和单科
         grade_data = next((item for item in post_data['data']['scoreRateVOList'] if item['classId'] == "-1"), None)
         if grade_data:
             content.append(f"数据更新时间: {datetime.now().strftime('%H:%M:%S')}")
